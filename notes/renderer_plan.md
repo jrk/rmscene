@@ -89,15 +89,27 @@ Remaining polish (diminishing returns): pencil grain character
 marker slight over-width/shape (IoU 0.92, structural), paintbrush
 envelope (IoU 0.78).
 
-### M4 — vector backends
-- PDF first (Skia PDF canvas reuses existing drawing; `kDarken` for
-  highlights over PDF backgrounds; optional true `/Highlight` annotations
-  from union geometry).
-- SVG: variable-width strokes as filled outline paths (offset-curve
-  ribbons); highlights pre-unioned via Skia pathops into one opaque
-  `<path>` per color placed before ink — correct in any viewer without
-  blend-mode support. Path simplification for file size.
-- Vector texture pens: intensity-as-color + `kDarken` (RCU's approach).
+### M4 — vector backends ✅ DONE (2026-06-12)
+`render_pdf` / `render_svg` drive the same calibrated `render_scene`
+through Skia's PDF and SVG canvases with `vector=True`:
+- Shader: per-stroke outline union (skia pathops over per-segment
+  stroked fill paths) filled at alpha 0.235 — layer-free equivalent of
+  saveLayerAlpha, accumulates across strokes in any viewer.
+- Pencil family: opaque paper-blended gray strokes per segment (no
+  embedded images); crossings don't compound.
+- Ballpoint railroading and the opaque under-ink highlight union carry
+  over unchanged.
+CLI dispatches on extension: `python -m rmrender in.rm out.{png,pdf,svg}`.
+Validated by rasterizing outputs back through the harness
+(`tests/test_vector.py`, pymupdf + cairosvg): SVG ballpoint IoU 0.967
+(matches raster), shader 0.988, highlighter 0.970; PDF slightly lower
+(ballpoint 0.920) from rasterizer AA differences. File sizes: PDF
+15-114 KB, SVG 85-377 KB per page.
+
+M4 follow-ups (on demand): polyline run-merging to shrink SVGs;
+`kDarken`/multiply highlight blending for rendering over PDF/template
+backgrounds; true PDF `/Highlight` annotations; multi-page notebook PDF
+export.
 
 ### M5 — edge cases
 - Text-anchored groups + typed text rendering (root text).

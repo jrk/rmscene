@@ -1,14 +1,18 @@
-"""Raster rendering of v6 scenes with skia-python.
+"""Rendering of v6 scenes with skia-python: raster (PNG) and vector (PDF, SVG).
 
-M0 strategy (see notes/renderer_plan.md):
+Strategy (see notes/renderer_plan.md):
 
 - Ink strokes: one antialiased round-capped line segment per point pair,
-  stroke width taken from the device-stored nib width at the segment's
-  start point (RCU's approach).
-- Highlighter: drawn first, globally under all ink, as a single stroked
-  polyline per stroke at the stored constant nib width, with a fully
-  opaque color -- overlapping highlights merge into a flat union and ink
-  stays uncovered on top.
+  width averaged between the endpoints' device-stored nib widths;
+  ballpoint "railroading" rails below the light-pressure threshold.
+- Highlighter: drawn first, globally under all ink, fully opaque --
+  overlapping highlights merge into a flat union, ink stays on top.
+- Pencil family: raster mode stamps stipple sprites (matching the
+  device's pure-black dither); vector mode falls back to opaque
+  paper-blended gray strokes.
+- Shader: per-stroke uniform alpha that accumulates across strokes --
+  saveLayerAlpha in raster mode, a single unioned outline path with a
+  translucent fill in vector mode.
 """
 
 import logging
@@ -155,6 +159,92 @@ def _draw_shader(canvas: skia.Canvas, stroke: RenderStroke) -> None:
     canvas.restore()
 
 
+def _stroke_outline(stroke: RenderStroke) -> skia.Path:
+    """Union of the stroke's per-segment stroked outlines: one fill path
+    covering the variable-width ribbon, uniform even where it
+    self-overlaps."""
+    dx, dy = stroke.offset
+    points = stroke.points
+    builder = skia.OpBuilder()
+    paint = skia.Paint(
+        Style=skia.Paint.kStroke_Style, StrokeCap=skia.Paint.kRound_Cap
+    )
+    if len(points) == 1:
+        p = points[0]
+        dot = skia.Path()
+        dot.addCircle(p.x + dx, p.y + dy, pens.nib_px(stroke.tool, p) / 2)
+        builder.add(dot, skia.PathOp.kUnion_PathOp)
+        return builder.resolve()
+    for p0, p1 in zip(points, points[1:]):
+        seg = skia.Path()
+        seg.moveTo(p0.x + dx, p0.y + dy)
+        seg.lineTo(p1.x + dx, p1.y + dy)
+        paint.setStrokeWidth(
+            (pens.nib_px(stroke.tool, p0) + pens.nib_px(stroke.tool, p1)) / 2
+        )
+        fill = skia.Path()
+        paint.getFillPath(seg, fill)
+        builder.add(fill, skia.PathOp.kUnion_PathOp)
+    return builder.resolve()
+
+
+def _draw_shader_vector(canvas: skia.Canvas, stroke: RenderStroke) -> None:
+    """Vector-safe shader: one unioned outline filled translucently.
+
+    Equivalent to the raster saveLayerAlpha approach (uniform within a
+    stroke, accumulating across strokes) but expressible in PDF/SVG
+    without layers."""
+    r, g, b, a = stroke.rgba
+    paint = skia.Paint(
+        AntiAlias=True,
+        Color=skia.Color(r, g, b, round(a * pens.SHADER_ALPHA)),
+        Style=skia.Paint.kFill_Style,
+    )
+    canvas.drawPath(_stroke_outline(stroke), paint)
+
+
+def _draw_stippled_vector(canvas: skia.Canvas, stroke: RenderStroke) -> None:
+    """Vector fallback for the pencil family: opaque paper-blended gray.
+
+    The raster stipple cannot be carried into PDF/SVG without embedding
+    images; instead each run of similar coverage becomes a stroke whose
+    color is the ink blended toward paper by (1 - coverage). Opaque
+    paint keeps crossings from compounding.
+    """
+    dx, dy = stroke.offset
+    points = stroke.points
+    r, g, b, a = stroke.rgba
+
+    def gray(coverage: float) -> skia.Paint:
+        cr = round(255 - (255 - r) * coverage)
+        cg = round(255 - (255 - g) * coverage)
+        cb = round(255 - (255 - b) * coverage)
+        p = skia.Paint(
+            AntiAlias=True,
+            Color=skia.Color(cr, cg, cb, a),
+            Style=skia.Paint.kStroke_Style,
+        )
+        p.setStrokeCap(skia.Paint.kRound_Cap)
+        return p
+
+    if len(points) == 1:
+        p = points[0]
+        cov = pens.stipple_coverage(stroke.tool, p.pressure)
+        dot = gray(cov)
+        dot.setStyle(skia.Paint.kFill_Style)
+        canvas.drawCircle(p.x + dx, p.y + dy, pens.nib_px(stroke.tool, p) / 2, dot)
+        return
+    for p0, p1 in zip(points, points[1:]):
+        cov = pens.stipple_coverage(
+            stroke.tool, (p0.pressure + p1.pressure) / 2
+        )
+        paint = gray(cov)
+        paint.setStrokeWidth(
+            (pens.nib_px(stroke.tool, p0) + pens.nib_px(stroke.tool, p1)) / 2
+        )
+        canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
+
+
 def _draw_highlight(canvas: skia.Canvas, stroke: RenderStroke) -> None:
     dx, dy = stroke.offset
     points = stroke.points
@@ -170,8 +260,16 @@ def _draw_highlight(canvas: skia.Canvas, stroke: RenderStroke) -> None:
 
 
 def render_scene(
-    canvas: skia.Canvas, strokes: list[RenderStroke], shift_x: float
+    canvas: skia.Canvas,
+    strokes: list[RenderStroke],
+    shift_x: float,
+    vector: bool = False,
 ) -> None:
+    """Draw strokes onto any skia canvas (raster, PDF, or SVG).
+
+    `vector` selects layer-free, image-free drawing for the pens whose
+    raster path uses saveLayer or sprite stamping.
+    """
     canvas.translate(shift_x, 0)
     # Highlights form a global background layer under all ink.
     for stroke in strokes:
@@ -181,9 +279,9 @@ def render_scene(
         if stroke.highlight:
             continue
         if pens.is_shader(stroke.tool):
-            _draw_shader(canvas, stroke)
+            (_draw_shader_vector if vector else _draw_shader)(canvas, stroke)
         elif pens.is_stippled(stroke.tool):
-            _draw_stippled(canvas, stroke)
+            (_draw_stippled_vector if vector else _draw_stippled)(canvas, stroke)
         else:
             _draw_ink(canvas, stroke)
 
@@ -211,3 +309,48 @@ def render_png(
     surface.makeImageSnapshot().save(png_path, skia.kPNG)
     _logger.info("Rendered %d strokes to %s (%dx%d)", len(strokes), png_path, out_w, out_h)
     return out_w, out_h
+
+
+# Device pixels per inch; reMarkable 2 is 226, Paper Pro is 229. Used to
+# size PDF pages in points.
+SCREEN_DPI = 226
+
+
+def render_pdf(rm_path: str, pdf_path: str, dpi: float = SCREEN_DPI) -> tuple[float, float]:
+    """Render `rm_path` to a single-page vector PDF.
+
+    Returns the page size in points.
+    """
+    with open(rm_path, "rb") as f:
+        tree = read_tree(f)
+    strokes = extract_strokes(tree)
+    page_w, page_h = page_size(tree)
+    pt = 72.0 / dpi
+    w_pt, h_pt = page_w * pt, page_h * pt
+
+    stream = skia.FILEWStream(pdf_path)
+    doc = skia.PDF.MakeDocument(stream)
+    canvas = doc.beginPage(w_pt, h_pt)
+    canvas.scale(pt, pt)
+    render_scene(canvas, strokes, shift_x=page_w / 2, vector=True)
+    doc.endPage()
+    doc.close()
+    stream.flush()
+    _logger.info("Rendered %d strokes to %s (%.0fx%.0f pt)", len(strokes), pdf_path, w_pt, h_pt)
+    return w_pt, h_pt
+
+
+def render_svg(rm_path: str, svg_path: str) -> tuple[int, int]:
+    """Render `rm_path` to an SVG sized in page pixels."""
+    with open(rm_path, "rb") as f:
+        tree = read_tree(f)
+    strokes = extract_strokes(tree)
+    page_w, page_h = page_size(tree)
+
+    stream = skia.FILEWStream(svg_path)
+    canvas = skia.SVGCanvas.Make(skia.Rect.MakeWH(page_w, page_h), stream)
+    render_scene(canvas, strokes, shift_x=page_w / 2, vector=True)
+    del canvas  # finalize the SVG document
+    stream.flush()
+    _logger.info("Rendered %d strokes to %s (%dx%d)", len(strokes), svg_path, page_w, page_h)
+    return page_w, page_h
