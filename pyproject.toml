@@ -6,10 +6,18 @@ authors = ["Rick Lupton <mail@ricklupton.name>"]
 license = "MIT"
 repository = "https://github.com/ricklupton/rmscene"
 readme = "README.md"
+packages = [
+    { include = "rmscene", from = "src" },
+    { include = "rmrender", from = "src" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.10"
 packaging = "^23.0"
+skia-python = { version = ">=87", optional = true }
+
+[tool.poetry.extras]
+render = ["skia-python"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.4"
