@@ -29,8 +29,18 @@ class RenderStroke:
 
 def page_size(tree: SceneTree) -> tuple[int, int]:
     info = getattr(tree, "scene_info", None)
-    if info is not None and info.paper_size is not None:
-        return info.paper_size
+    if info is not None:
+        # Firmware 3.27+ also writes the size as doubles; prefer the
+        # newer fields in case the legacy int pair stops being written.
+        lww = getattr(info, "paper_size_lww", None)
+        if lww is not None:
+            w, h = lww.value
+            return round(w), round(h)
+        raw = getattr(info, "paper_size_raw", None)
+        if raw is not None:
+            return round(raw[0]), round(raw[1])
+        if info.paper_size is not None:
+            return info.paper_size
     return DEFAULT_PAGE_SIZE
 
 
