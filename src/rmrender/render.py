@@ -12,6 +12,7 @@ M0 strategy (see notes/renderer_plan.md):
 """
 
 import logging
+import math
 import typing as tp
 
 import skia
@@ -49,6 +50,70 @@ def _draw_ink(canvas: skia.Canvas, stroke: RenderStroke) -> None:
         canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
 
 
+def _draw_stippled(canvas: skia.Canvas, stroke: RenderStroke) -> None:
+    """Stamp grain sprites along the stroke (pencil family).
+
+    The device draws these pens as pure black at pressure-dependent
+    density; we walk the polyline at fixed arc-length steps and stamp a
+    stipple disk scaled to the local nib width.
+    """
+    from .textures import stipple_bank
+
+    bank = stipple_bank()
+    dx, dy = stroke.offset
+    paint = skia.Paint(
+        AntiAlias=True,
+        ColorFilter=skia.ColorFilters.Blend(
+            skia.Color(*stroke.rgba[:3], stroke.rgba[3]), skia.BlendMode.kSrcIn
+        ),
+    )
+    sampling = skia.SamplingOptions(skia.FilterMode.kLinear)
+
+    def stamp(x: float, y: float, nib: float, coverage: float) -> None:
+        img = bank.get(coverage)
+        r = max(nib / 2, 0.4)
+        canvas.drawImageRect(
+            img, skia.Rect.MakeLTRB(x - r, y - r, x + r, y + r), sampling, paint
+        )
+
+    points = stroke.points
+    if len(points) == 1:
+        p = points[0]
+        cov = pens.stipple_coverage(stroke.tool, p.pressure)
+        stamp(p.x + dx, p.y + dy, pens.nib_px(stroke.tool, p), cov)
+        return
+
+    residual = 0.0
+    for p0, p1 in zip(points, points[1:]):
+        seg_len = math.hypot(p1.x - p0.x, p1.y - p0.y)
+        if seg_len == 0:
+            continue
+        nib0, nib1 = pens.nib_px(stroke.tool, p0), pens.nib_px(stroke.tool, p1)
+        t = residual
+        while t < seg_len:
+            f = t / seg_len
+            x = p0.x + (p1.x - p0.x) * f + dx
+            y = p0.y + (p1.y - p0.y) * f + dy
+            nib = nib0 * (1 - f) + nib1 * f
+            pressure = p0.pressure * (1 - f) + p1.pressure * f
+            stamp(x, y, nib, pens.stipple_coverage(stroke.tool, pressure))
+            t += max(nib * 0.35, 0.7)
+        residual = t - seg_len
+
+
+def _draw_shader(canvas: skia.Canvas, stroke: RenderStroke) -> None:
+    """Translucent ink with uniform per-stroke alpha.
+
+    Drawn opaque into a transient layer composited once at SHADER_ALPHA:
+    self-overlap within a stroke stays uniform, while separate strokes
+    accumulate (matching the device, measured single/double coverage).
+    """
+    bounds = None  # full canvas; strokes are small, this is fine for now
+    canvas.saveLayerAlpha(bounds, round(pens.SHADER_ALPHA * 255))
+    _draw_ink(canvas, stroke)
+    canvas.restore()
+
+
 def _draw_highlight(canvas: skia.Canvas, stroke: RenderStroke) -> None:
     dx, dy = stroke.offset
     points = stroke.points
@@ -72,7 +137,13 @@ def render_scene(
         if stroke.highlight:
             _draw_highlight(canvas, stroke)
     for stroke in strokes:
-        if not stroke.highlight:
+        if stroke.highlight:
+            continue
+        if pens.is_shader(stroke.tool):
+            _draw_shader(canvas, stroke)
+        elif pens.is_stippled(stroke.tool):
+            _draw_stippled(canvas, stroke)
+        else:
             _draw_ink(canvas, stroke)
 
 

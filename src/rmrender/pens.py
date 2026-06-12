@@ -54,26 +54,63 @@ def resolve_color(
 
 
 # Width multipliers applied to the stored nib width (point.width / 4).
-# Sources: RCU pens (pencil 0.58, mech 1/1.5, marker 0.7, paintbrush 0.75).
-_NIB_SCALE: dict[Pen, float] = {
+# Starting points from RCU pens, then calibrated against official
+# renders via rmrender.calibrate.
+NIB_SCALE: dict[Pen, float] = {
     Pen.PENCIL_1: 0.58,
     Pen.PENCIL_2: 0.58,
-    Pen.MECHANICAL_PENCIL_1: 1 / 1.5,
-    Pen.MECHANICAL_PENCIL_2: 1 / 1.5,
+    Pen.MECHANICAL_PENCIL_1: 0.9,
+    Pen.MECHANICAL_PENCIL_2: 0.9,
     Pen.MARKER_1: 0.7,
     Pen.MARKER_2: 0.7,
     Pen.PAINTBRUSH_1: 0.75,
     Pen.PAINTBRUSH_2: 0.75,
 }
+_NIB_SCALE = NIB_SCALE
+
+_PAINTBRUSH = (Pen.PAINTBRUSH_1, Pen.PAINTBRUSH_2)
+_PENCIL = (Pen.PENCIL_1, Pen.PENCIL_2)
+_MECH_PENCIL = (Pen.MECHANICAL_PENCIL_1, Pen.MECHANICAL_PENCIL_2)
+
+# Shader: translucent, accumulates across strokes (unlike highlighter).
+# Single-coverage gray measured at ~187/255 in official renders.
+SHADER_ALPHA = 0.235
 
 
 def nib_px(tool: Pen, point: Point) -> float:
     """Final nib width in page pixels at this point."""
-    return (point.width / 4) * _NIB_SCALE.get(tool, 1.0)
+    nib = (point.width / 4) * _NIB_SCALE.get(tool, 1.0)
+    if tool in _PAINTBRUSH:
+        # RCU: pressure narrows the brush below the stored nib (clamped
+        # so saturated pressure never widens it).
+        nib *= 1 + 0.75 * (min(point.pressure * 0.005, 1.0) - 1)
+    return nib
+
+
+# Stipple density curves: coverage = base + scale * p**gamma, clamped to 1.
+# Calibrated against official renders via rmrender.calibrate (mae_blur).
+PENCIL_CURVE = (0.07, 0.83, 1.6)
+MECH_CURVE = (0.45, 0.6, 1.0)
+
+
+def is_stippled(tool: Pen) -> bool:
+    """Pens the device renders as pure black grain at varying density."""
+    return tool in _PENCIL or tool in _MECH_PENCIL
+
+
+def stipple_coverage(tool: Pen, pressure: float) -> float:
+    """Grain density (0..1) at `pressure` (raw 0-255)."""
+    p = pressure / 255
+    base, scale, gamma = PENCIL_CURVE if tool in _PENCIL else MECH_CURVE
+    return min(1.0, base + scale * p**gamma)
 
 
 def is_highlight(tool: Pen) -> bool:
     return Pen.is_highlighter(tool)
+
+
+def is_shader(tool: Pen) -> bool:
+    return tool == Pen.SHADER
 
 
 def should_skip(tool: Pen) -> bool:

@@ -34,22 +34,45 @@ no vector outputs yet; typed text and text-anchored groups unrendered.
 
 ## Next milestones
 
-### M2 — calibration harness (next up; the keystone)
-`calibrate/` tool: render a `.rm` at the official PNG's resolution, align,
-produce per-pixel diff + SSIM + side-by-side contact sheets; lock scores as
-golden regression tests. Every fidelity change after this is measured, not
-eyeballed. First golden: `jrk_test`. Blocked only on calibration captures
-(see "Captures needed" below) for full tool coverage.
+### M2 — calibration harness ✅ DONE (2026-06-12)
+`rmrender/calibrate.py`: renders each notebook page at the official PNG's
+resolution, reports SSIM / ink-IoU / MAE / blurred-density MAE, writes
+[ref | ours | diff] contact sheets and metrics.json. CLI:
+`python -m rmrender.calibrate NOTEBOOK_DIR RENDERED_DIR -o OUT`.
+Golden regression tests in `tests/test_calibration.py` over the 13-page
+capture suite in `tests/data/render_calibration/` (raw synced notebook +
+official renders, all 1404x1872 1:1).
 
-### M3 — intensity & texture models (biggest visible win)
-- Ballpoint per-segment intensity (start `pressure_n^5 + 0.7`, refit
-  against captures); decide gray vs dither grain from close-ups.
-- Procedural grain sprites (license-clean, remy-style) for pencil /
-  mechanical pencil / paintbrush; spatter second pass; paintbrush sprite
-  rotation to `direction + 90°`.
-- Switch raster ink to arc-length stamping: smooth width interpolation
-  between points, `starting_length` as texture phase. Fixes width stepping.
-- Shader semantics from its capture (accumulate on overlap or not?).
+Findings from the capture suite (also in renderer_research.md):
+- Eraser and erase-area edits are **fully baked at edit time** — no
+  eraser strokes persist in saved files. Nothing to render.
+- Lasso-scale **re-bakes stored point widths** (and coordinates);
+  `thickness_scale` changes but stays renderer-irrelevant.
+- Pencil / mech pencil / paintbrush official ink is **pure black binary
+  stipple** (density varies, never gray).
+- Shader is translucent (single coverage gray ≈187/255 → alpha 0.235)
+  and **accumulates across strokes**, unlike highlighter; uniform within
+  a stroke.
+- Two-layer page matches the global-background highlight model.
+
+### M3 — intensity & texture models ✅ MOSTLY DONE (2026-06-12)
+Implemented and calibrated against the captures:
+- Pencil + mech pencil: arc-length stamped procedural stipple disks
+  (`textures.py`, grain=2 clumps), coverage curves in `pens.py`
+  (pencil `0.07 + 0.83·p^1.6`, mech `0.45 + 0.6·p`, mech nib 0.9 —
+  RCU's 1/1.5 was wrong for v6).
+- Shader: per-stroke saveLayerAlpha at 0.235 (uniform within stroke,
+  accumulates across strokes). SSIM 0.991.
+- Paintbrush: pressure narrows nib below stored width (clamped RCU
+  formula). SSIM 0.983.
+
+Remaining M3 polish (diminishing returns, revisit on demand):
+- Pencil grain *character*: official strokes have a softer, fuzzier
+  spread (mae_blur plateaus ~34 regardless of density) — likely needs
+  the RCU "spatter" second pass and/or directional grain.
+- Ballpoint light-pressure intensity fade (tails slightly heavy; page
+  already at SSIM 0.999 / mae_blur 5).
+- Marker slight over-width (mae_blur 11).
 
 ### M4 — vector backends
 - PDF first (Skia PDF canvas reuses existing drawing; `kDarken` for
@@ -67,7 +90,11 @@ eyeballed. First golden: `jrk_test`. Blocked only on calibration captures
 - Accurate eraser via clip paths (needed over templates/PDF backgrounds).
 - Selection-*scale* behavior: confirm stored widths rescale (one capture).
 
-## Captures needed (action: jrk)
+## Captures needed (action: jrk) — ✅ RECEIVED 2026-06-12
+
+Delivered as a 13-page raw synced notebook + official renders in
+`tests/data/render_calibration/{notebook,rendered}/` (covers everything
+below except `calib_highlight_legacy`). Kept for reference:
 
 For each item: one notebook page on the device, exported two ways with
 matching content — the raw `.rm` page file and the official PNG render
@@ -105,15 +132,16 @@ Resolved: package location (standalone, this repo); highlight scope
 (global background); language (Python/skia-python); `move_id` (provenance
 only, no renderer work).
 
-Still open — all answered by captures above except the last two:
-1. Ballpoint intensity curve and grain type (gray vs dither).
-2. Shader overlap semantics.
-3. Legacy highlight pastel color.
-4. Eraser-on-template behavior (white ink vs true clip).
-5. Whether lasso-scale rescales stored nib widths.
-6. Does xochitl smooth between sampled points? (compare close-ups at high
-   zoom; affects M3 stamping spacing and M4 outline quality)
-7. skia-python no-skia fallback (pure-PIL stamp renderer) — decide if/when
+Newly resolved by the capture suite: shader accumulates across strokes
+(α=0.235); eraser/erase-area are baked at edit time (nothing to render,
+even over templates); lasso-scale re-bakes stored widths.
+
+Still open:
+1. Ballpoint light-pressure fade curve (minor; page already SSIM 0.999).
+2. Legacy highlight pastel color (needs an old pre-3.x notebook).
+3. Pencil grain character (spatter pass / directional grain).
+4. Does xochitl smooth between sampled points? (affects M4 outline quality)
+5. skia-python no-skia fallback (pure-PIL stamp renderer) — decide if/when
    someone needs an environment without the wheel.
-8. Performance target for batch export — revisit at M4; vectorize stamping
+6. Performance target for batch export — revisit at M4; vectorize stamping
    with numpy or `drawAtlas` only if needed.
