@@ -67,9 +67,14 @@ Implemented and calibrated against the captures:
   formula). SSIM 0.983.
 
 M3 polish round 2 (2026-06-12, "make ballpoint really faithful"):
-- **No ballpoint intensity model needed**: 97.7% of official ballpoint
-  interior ink is pure black -- the light-pressure "grain" is sub-pixel
-  thin strokes dissolving into AA. Faithfulness = width precision.
+- Ballpoint ink is pure black overall (97.7% of interior px), BUT a
+  zoomed official screenshot (rendered/01-ballpoint-highres.png) shows
+  **"railroading"** at light pressure: a lighter streak along the
+  stroke core (ink riding the nib rims), at stroke starts/ends and fast
+  inter-letter links. Modeled as two dark rails (0.42 nib at +/-0.30
+  nib) plus a center line whose alpha fades with hole strength
+  h = max(0, (0.3 - p_n)/0.3); mid-gray fraction in the affected region
+  matches official exactly (0.121) at threshold 0.3.
 - Solid pens (ballpoint/fineliner/calligraphy) render **8% narrower**
   than the stored nib (NIB_SCALE 0.92, calibrated); per-segment width =
   average of endpoint nibs. Ink px now within 1% of official; IoU

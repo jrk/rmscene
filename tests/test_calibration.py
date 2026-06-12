@@ -12,7 +12,7 @@ import pytest
 skia = pytest.importorskip("skia")
 np = pytest.importorskip("numpy")
 
-from rmrender.calibrate import notebook_pages, run_page
+from rmrender.calibrate import notebook_pages, reference_renders, run_page
 
 BASE = pathlib.Path(__file__).parent / "data" / "render_calibration"
 
@@ -36,7 +36,7 @@ THRESHOLDS = {
 
 def _pages():
     pages = notebook_pages(BASE / "notebook")
-    refs = sorted((BASE / "rendered").glob("*.png"))
+    refs = reference_renders(BASE / "rendered")
     assert len(pages) == len(refs)
     return list(zip(refs, pages))
 

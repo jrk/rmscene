@@ -48,10 +48,33 @@ def _draw_ink(canvas: skia.Canvas, stroke: RenderStroke) -> None:
     for p0, p1 in zip(points, points[1:]):
         # Average the endpoints' nibs: closer to the device's smooth
         # width interpolation than using either endpoint alone.
-        paint.setStrokeWidth(
-            (pens.nib_px(stroke.tool, p0) + pens.nib_px(stroke.tool, p1)) / 2
+        w = (pens.nib_px(stroke.tool, p0) + pens.nib_px(stroke.tool, p1)) / 2
+        hole = pens.railroad_hole(
+            stroke.tool, (p0.pressure + p1.pressure) / 2
         )
-        canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
+        if hole <= 0:
+            paint.setStrokeWidth(w)
+            canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
+            continue
+        # Railroading: two dark rails with a faded core streak.
+        sx, sy = p1.x - p0.x, p1.y - p0.y
+        length = math.hypot(sx, sy)
+        if length == 0:
+            paint.setStrokeWidth(w)
+            canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
+            continue
+        nx, ny = -sy / length * w * 0.30, sx / length * w * 0.30
+        paint.setStrokeWidth(w * 0.42)
+        for ox, oy in ((nx, ny), (-nx, -ny)):
+            canvas.drawLine(
+                p0.x + dx + ox, p0.y + dy + oy,
+                p1.x + dx + ox, p1.y + dy + oy, paint,
+            )
+        r, g, b, a = stroke.rgba
+        core = _paint((r, g, b, round(a * (1 - hole))))
+        core.setStrokeCap(skia.Paint.kRound_Cap)
+        core.setStrokeWidth(w * 0.36)
+        canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, core)
 
 
 def _draw_stippled(canvas: skia.Canvas, stroke: RenderStroke) -> None:

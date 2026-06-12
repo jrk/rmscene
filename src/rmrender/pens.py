@@ -123,6 +123,23 @@ def stipple_coverage(tool: Pen, pressure: float) -> float:
     return min(1.0, base + scale * p**gamma)
 
 
+_BALLPOINT = (Pen.BALLPOINT_1, Pen.BALLPOINT_2)
+
+# Ballpoint "railroading": at light pressure the device leaves a lighter
+# streak along the stroke core (ink riding the nib rims), visible at
+# stroke starts/ends and fast inter-letter links. Hole strength ramps in
+# below this normalized pressure.
+RAILROAD_PRESSURE = 0.3
+
+
+def railroad_hole(tool: Pen, pressure: float) -> float:
+    """0 = solid stroke; 1 = fully starved core (ballpoint only)."""
+    if tool not in _BALLPOINT:
+        return 0.0
+    p = pressure / 255
+    return max(0.0, (RAILROAD_PRESSURE - p) / RAILROAD_PRESSURE)
+
+
 def is_highlight(tool: Pen) -> bool:
     return Pen.is_highlighter(tool)
 

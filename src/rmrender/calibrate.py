@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import pathlib
+import re
 import typing as tp
 
 import numpy as np
@@ -144,13 +145,25 @@ def notebook_pages(notebook_dir: pathlib.Path) -> list[pathlib.Path]:
     return [notebook_dir / doc_id / f"{pid}.rm" for pid in page_ids]
 
 
+def reference_renders(rendered_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Page renders named like `01-ballpoint.png`, in page order.
+
+    Other files (e.g. zoomed `-highres` detail screenshots) are ignored.
+    """
+    return sorted(
+        f
+        for f in rendered_dir.glob("*.png")
+        if re.fullmatch(r"\d+-\w+\.png", f.name)
+    )
+
+
 def run_notebook(
     notebook_dir: pathlib.Path,
     rendered_dir: pathlib.Path,
     out_dir: pathlib.Path,
 ) -> list[dict]:
     pages = notebook_pages(notebook_dir)
-    refs = sorted(rendered_dir.glob("*.png"))
+    refs = reference_renders(rendered_dir)
     if len(pages) != len(refs):
         raise ValueError(
             f"{len(pages)} pages but {len(refs)} reference renders"
