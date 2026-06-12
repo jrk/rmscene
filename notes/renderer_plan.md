@@ -66,13 +66,23 @@ Implemented and calibrated against the captures:
 - Paintbrush: pressure narrows nib below stored width (clamped RCU
   formula). SSIM 0.983.
 
-Remaining M3 polish (diminishing returns, revisit on demand):
-- Pencil grain *character*: official strokes have a softer, fuzzier
-  spread (mae_blur plateaus ~34 regardless of density) — likely needs
-  the RCU "spatter" second pass and/or directional grain.
-- Ballpoint light-pressure intensity fade (tails slightly heavy; page
-  already at SSIM 0.999 / mae_blur 5).
-- Marker slight over-width (mae_blur 11).
+M3 polish round 2 (2026-06-12, "make ballpoint really faithful"):
+- **No ballpoint intensity model needed**: 97.7% of official ballpoint
+  interior ink is pure black -- the light-pressure "grain" is sub-pixel
+  thin strokes dissolving into AA. Faithfulness = width precision.
+- Solid pens (ballpoint/fineliner/calligraphy) render **8% narrower**
+  than the stored nib (NIB_SCALE 0.92, calibrated); per-segment width =
+  average of endpoint nibs. Ink px now within 1% of official; IoU
+  0.96-0.97 (ballpoint 0.9654, jrk_test page 0.9806).
+- **Device draws raw polylines**: Catmull-Rom smoothing *reduces* IoU
+  (0.9654 -> 0.9609). Open question 4 resolved -- no smoothing.
+- Pencil spatter pass added (1.5x width, 0.2x coverage stamp behind
+  primary): mae_blur 34.6 -> 32.7 at matched ink budget.
+
+Remaining polish (diminishing returns): pencil grain character
+(mae_blur plateaus ~33; official redistributes ink, doesn't add it),
+marker slight over-width/shape (IoU 0.92, structural), paintbrush
+envelope (IoU 0.78).
 
 ### M4 — vector backends
 - PDF first (Skia PDF canvas reuses existing drawing; `kDarken` for
@@ -137,10 +147,12 @@ Newly resolved by the capture suite: shader accumulates across strokes
 even over templates); lasso-scale re-bakes stored widths.
 
 Still open:
-1. Ballpoint light-pressure fade curve (minor; page already SSIM 0.999).
+1. ~~Ballpoint light-pressure fade curve~~ RESOLVED: no fade exists;
+   official ballpoint ink is pure black, thin-stroke AA does the rest.
 2. Legacy highlight pastel color (needs an old pre-3.x notebook).
 3. Pencil grain character (spatter pass / directional grain).
-4. Does xochitl smooth between sampled points? (affects M4 outline quality)
+4. ~~Does xochitl smooth between sampled points?~~ RESOLVED: no --
+   raw polylines match best; smoothing reduces IoU.
 5. skia-python no-skia fallback (pure-PIL stamp renderer) — decide if/when
    someone needs an environment without the wheel.
 6. Performance target for batch export — revisit at M4; vectorize stamping
