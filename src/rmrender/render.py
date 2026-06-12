@@ -46,7 +46,11 @@ def _draw_ink(canvas: skia.Canvas, stroke: RenderStroke) -> None:
         canvas.drawCircle(p.x + dx, p.y + dy, pens.nib_px(stroke.tool, p) / 2, dot)
         return
     for p0, p1 in zip(points, points[1:]):
-        paint.setStrokeWidth(pens.nib_px(stroke.tool, p0))
+        # Average the endpoints' nibs: closer to the device's smooth
+        # width interpolation than using either endpoint alone.
+        paint.setStrokeWidth(
+            (pens.nib_px(stroke.tool, p0) + pens.nib_px(stroke.tool, p1)) / 2
+        )
         canvas.drawLine(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, paint)
 
 
@@ -69,11 +73,25 @@ def _draw_stippled(canvas: skia.Canvas, stroke: RenderStroke) -> None:
     )
     sampling = skia.SamplingOptions(skia.FilterMode.kLinear)
 
+    spatter = pens.spatter(stroke.tool)
+
     def stamp(x: float, y: float, nib: float, coverage: float) -> None:
-        img = bank.get(coverage)
         r = max(nib / 2, 0.4)
+        if spatter is not None:
+            w_mult, c_mult = spatter
+            canvas.drawImageRect(
+                bank.get(coverage * c_mult),
+                skia.Rect.MakeLTRB(
+                    x - r * w_mult, y - r * w_mult, x + r * w_mult, y + r * w_mult
+                ),
+                sampling,
+                paint,
+            )
         canvas.drawImageRect(
-            img, skia.Rect.MakeLTRB(x - r, y - r, x + r, y + r), sampling, paint
+            bank.get(coverage),
+            skia.Rect.MakeLTRB(x - r, y - r, x + r, y + r),
+            sampling,
+            paint,
         )
 
     points = stroke.points

@@ -57,6 +57,13 @@ def resolve_color(
 # Starting points from RCU pens, then calibrated against official
 # renders via rmrender.calibrate.
 NIB_SCALE: dict[Pen, float] = {
+    # Solid pens render ~7% narrower than the stored nib on-device
+    # (calibrated: ink pixel counts and IoU peak at 0.92).
+    Pen.BALLPOINT_1: 0.92,
+    Pen.BALLPOINT_2: 0.92,
+    Pen.FINELINER_1: 0.92,
+    Pen.FINELINER_2: 0.92,
+    Pen.CALIGRAPHY: 0.92,
     Pen.PENCIL_1: 0.58,
     Pen.PENCIL_2: 0.58,
     Pen.MECHANICAL_PENCIL_1: 0.9,
@@ -89,8 +96,19 @@ def nib_px(tool: Pen, point: Point) -> float:
 
 # Stipple density curves: coverage = base + scale * p**gamma, clamped to 1.
 # Calibrated against official renders via rmrender.calibrate (mae_blur).
-PENCIL_CURVE = (0.07, 0.83, 1.6)
+PENCIL_CURVE = (0.05, 0.62, 1.6)
 MECH_CURVE = (0.45, 0.6, 1.0)
+
+# Pencil "spatter": a wider, sparser stamp behind the primary one,
+# giving the fuzzy edge spread of the real pencil (RCU draws an
+# analogous second pass). (width multiplier, coverage multiplier)
+PENCIL_SPATTER = (1.5, 0.2)
+
+
+def spatter(tool: Pen) -> tuple[float, float] | None:
+    if tool in _PENCIL:
+        return PENCIL_SPATTER
+    return None
 
 
 def is_stippled(tool: Pen) -> bool:
