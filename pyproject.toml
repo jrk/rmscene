@@ -15,9 +15,10 @@ packages = [
 python = "^3.10"
 packaging = "^23.0"
 skia-python = { version = ">=87", optional = true }
+pillow = { version = ">=9", optional = true }
 
 [tool.poetry.extras]
-render = ["skia-python"]
+render = ["skia-python", "pillow"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.4"

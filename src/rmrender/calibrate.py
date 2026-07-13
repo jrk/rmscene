@@ -135,12 +135,20 @@ def run_page(
 
 
 def notebook_pages(notebook_dir: pathlib.Path) -> list[pathlib.Path]:
-    """Page .rm files of a raw notebook directory, in page order."""
-    content_files = list(notebook_dir.glob("*.content"))
-    if len(content_files) != 1:
-        raise ValueError(f"Expected one .content file in {notebook_dir}")
-    content = json.loads(content_files[0].read_text())
-    doc_id = content_files[0].stem
+    """Page .rm files of the raw notebook in a sync directory, in page order.
+
+    A sync directory may also contain PDF documents, whose ``.content`` files
+    use a different page-list format.  Ignore those when locating the notebook.
+    """
+    notebooks = []
+    for content_file in notebook_dir.glob("*.content"):
+        content = json.loads(content_file.read_text())
+        if "cPages" in content:
+            notebooks.append((content_file, content))
+    if len(notebooks) != 1:
+        raise ValueError(f"Expected one notebook .content file in {notebook_dir}")
+    content_file, content = notebooks[0]
+    doc_id = content_file.stem
     page_ids = [p["id"] for p in content["cPages"]["pages"] if "deleted" not in p]
     return [notebook_dir / doc_id / f"{pid}.rm" for pid in page_ids]
 
