@@ -168,6 +168,19 @@ observable via output.
 
 ## 4. Answers to specific rendering questions
 
+### Moved strokes (`move_id`) — resolved, no renderer work needed
+When strokes are moved (lasso select + move), xochitl tombstones the original
+items and writes **brand-new Line items with rewritten point coordinates**;
+`move_id` on the new item is only a provenance back-reference to the replaced
+original (presumably for sync/undo), *not* a transform to apply at render
+time. Verified by diffing `tests/data/Lines_v2.rm` against
+`Lines_v2_updated.rm`: each updated line is an exact translated copy
+(uniform dx=464.0, dy=−267.594 across every point) with width/pressure
+preserved, new CrdtId, and `move_id` = the old line's CrdtId. A renderer
+that simply walks the visible tree renders moves correctly for free.
+(Open: whether *scaling* a selection also rescales stored nib widths —
+same mechanism, needs one calibration capture.)
+
 ### Ballpoint grain at light pressure / high speed
 Real device behavior. Two open-source models: lines-are-rusty's
 `opacity = pressure^5 + 0.7` and maxio/rmc's speed+pressure intensity → gray.
